@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   unit:
-    name: unit (${{ matrix.settings.name }}, ${{ matrix.pkg.name }})
+    name: unit (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
       matrix:
@@ -28,15 +28,6 @@ jobs:
             host: blacksmith-4vcpu-ubuntu-2404
           - name: windows
             host: blacksmith-4vcpu-windows-2025
-        pkg:
-          - id: opencode
-            name: opencode
-            dir: packages/opencode
-            filter: opencode
-          - id: app
-            name: app
-            dir: packages/app
-            filter: "@opencode-ai/app"
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
@@ -65,31 +56,16 @@ jobs:
             turbo-${{ runner.os }}-
 
       - name: Run unit tests
-        run: |
-          [[ "$RUNNER_OS" != "Windows" ]] && set -o pipefail || true
-          mkdir -p ".artifacts/unit/${{ matrix.pkg.id }}" "${{ matrix.pkg.dir }}/.artifacts/unit"
-          bunx turbo run test:ci --filter="${{ matrix.pkg.filter }}" --log-order=grouped --output-logs=full \
-            2>&1 | tee ".artifacts/unit/${{ matrix.pkg.id }}/turbo.log"
+        run: bun turbo test:ci
+        env:
+          OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
 
-      - name: Check unit report
+      - name: Publish unit reports
         if: always()
-        id: report
-        run: |
-          if [ -f "${{ matrix.pkg.dir }}/.artifacts/unit/junit.xml" ]; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "found=false" >> "$GITHUB_OUTPUT"
-          echo "### Unit report unavailable" >> "$GITHUB_STEP_SUMMARY"
-          echo "Turbo did not produce JUnit output for ${{ matrix.pkg.name }} on ${{ matrix.settings.name }}." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Publish unit report
-        if: always() && steps.report.outputs.found == 'true'
         uses: mikepenz/action-junit-report@v6
         with:
-          report_paths: ${{ matrix.pkg.dir }}/.artifacts/unit/junit.xml
-          check_name: "unit (${{ matrix.settings.name }}, ${{ matrix.pkg.name }})"
+          report_paths: packages/*/.artifacts/unit/junit.xml
+          check_name: "unit results (${{ matrix.settings.name }})"
           detailed_summary: true
           include_time_in_summary: true
           fail_on_failure: false
@@ -98,27 +74,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-${{ matrix.settings.name }}-${{ matrix.pkg.id }}-${{ github.run_attempt }}
+          name: unit-${{ matrix.settings.name }}-${{ github.run_attempt }}
           if-no-files-found: ignore
           retention-days: 7
-          path: |
-            .artifacts/unit/${{ matrix.pkg.id }}/turbo.log
-            ${{ matrix.pkg.dir }}/.artifacts/unit/junit.xml
-
-  unit-rollup:
-    name: unit (${{ matrix.name }})
-    needs: [unit]
-    if: always()
-    strategy:
-      matrix:
-        name: [linux, windows]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - run: |
-          if [[ "${{ needs.unit.result }}" != "success" ]]; then
-            echo "unit shards: ${{ needs.unit.result }}"
-            exit 1
-          fi
+          path: packages/*/.artifacts/unit/junit.xml
 
   e2e:
     name: e2e (${{ matrix.settings.name }})
